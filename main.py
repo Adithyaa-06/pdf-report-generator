@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
 from db import get_conn, init_db
 from pdf import REPORTS_DIR, render_pdf
@@ -11,6 +12,9 @@ from report import get_report_data
 
 BASE_DIR = Path(__file__).parent
 
+
+class CreateReportRequest(BaseModel):
+    force: bool = False
 
 
 @asynccontextmanager
@@ -48,14 +52,28 @@ def health():
 
 
 @app.post("/reports", status_code=201)
-def create_report():
+def create_report(body: CreateReportRequest | None = None):
+    force = body.force if body else False
+    today = date.today().isoformat()
     conn = get_conn()
     pdf_path = None
     try:
+        # IMMEDIATE takes the write lock up front, so concurrent POSTs queue here
+        # and the check below sees any report committed by the request before it.
         conn.execute("BEGIN IMMEDIATE")
+        if not force:
+            existing = conn.execute(
+                "SELECT id FROM reports WHERE created_at = ? ORDER BY id DESC LIMIT 1",
+                (today,),
+            ).fetchone()
+            if existing is not None:
+                conn.rollback()
+                report_id = existing["id"]
+                return JSONResponse(
+                    status_code=200, content={"id": report_id, "file": _file_link(report_id)}
+                )
         report_id = conn.execute(
-            "INSERT INTO reports (path, created_at) VALUES (NULL, ?)",
-            (date.today().isoformat(),),
+            "INSERT INTO reports (path, created_at) VALUES (NULL, ?)", (today,)
         ).lastrowid
         rel_path = f"reports/{report_id}.pdf"
         pdf_path = BASE_DIR / rel_path
