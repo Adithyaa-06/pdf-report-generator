@@ -1,4 +1,4 @@
-# FlyRank A8: PDF Report Generator
+# PDF Report Generator
 
 A small FastAPI service that turns a SQLite `orders` table into a downloadable PDF report.
 `POST /reports` aggregates the orders, renders an HTML report to an A4 PDF with headless Chromium (Playwright), saves the PDF to `reports/{id}.pdf` and returns a **link** to it.
